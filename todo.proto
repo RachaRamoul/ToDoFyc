@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package todo;
+
+// User message
+message User {
+    int32 id = 1;
+    string name = 2;
+}
+
+// Project message
+message Project {
+    int32 id = 1;
+    string name = 2;
+    int32 userId = 3;
+}
+
+// Todo message
+message Todo {
+    int32 id = 1;
+    string title = 2;
+    bool completed = 3;
+    int32 userId = 4;
+    int32 projectId = 5;
+}
+
+// AddUser request and response
+message AddUserRequest {
+    string name = 1;
+}
+message AddUserResponse {
+    User user = 1;
+}
+
+// AddProject request and response
+message AddProjectRequest {
+    string name = 1;
+    int32 userId = 2;
+}
+message AddProjectResponse {
+    Project project = 1;
+}
+
+// AddTodo request and response
+message AddTodoRequest {
+    string title = 1;
+    int32 userId = 2;
+    int32 projectId = 3;
+}
+message AddTodoResponse {
+    Todo todo = 1;
+}
+
+// Query messages
+message Empty {}
+message GetUserRequest {
+    int32 id = 1;
+}
+message GetTodosByUserRequest {
+    int32 userId = 1;
+}
+
+// Services
+service TodoService {
+    rpc AddUser(AddUserRequest) returns (AddUserResponse);
+    rpc AddProject(AddProjectRequest) returns (AddProjectResponse);
+    rpc AddTodo(AddTodoRequest) returns (AddTodoResponse);
+    rpc GetUsers(Empty) returns (stream User);
+    rpc GetProjects(Empty) returns (stream Project);
+    rpc GetTodos(Empty) returns (stream Todo);
+    rpc GetTodosByUser(GetTodosByUserRequest) returns (stream Todo);
+}

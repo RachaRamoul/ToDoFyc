@@ -1,141 +1,81 @@
-const express = require('express');
-const { graphqlHTTP } = require('express-graphql');
-const { buildSchema } = require('graphql');
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
 
-const app = express();
-const port = 3000;
+// Load the protobuf
+const PROTO_PATH = './todo.proto';
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true,
+});
+const todoProto = grpc.loadPackageDefinition(packageDefinition).todo;
 
-// Données en mémoire
-let todos = [];
+// In-memory data
 let users = [];
 let projects = [];
-let todoId = 1;
+let todos = [];
 let userId = 1;
 let projectId = 1;
+let todoId = 1;
 
-// GraphQL Schema
-const schema = buildSchema(`
-    type User {
-        id: ID!
-        name: String!
-        projects: [Project!]
-        todos: [Todo!]
-    }
-
-    type Project {
-        id: ID!
-        name: String!
-        user: User!
-        todos: [Todo!]
-    }
-    
-    type Todo {
-        id: ID!
-        title: String!
-        completed: Boolean!
-        user: User!
-        project: Project!
-    }
-
-    type Query {
-        users: [User!]
-        projects: [Project!]
-        todos: [Todo!]
-        user(id: ID!): User
-        project(id: ID!): Project
-        todo(id: ID!): Todo
-    }
-
-    input AddUserInput {
-        name: String!
-    }
-
-    input AddProjectInput {
-        name: String!
-        userId: ID!
-    }
-
-    input AddTodoInput {
-        title: String!
-        userId: ID!
-        projectId: ID!
-    }
-
-    type Mutation {
-        addUser(input: AddUserInput!): User!
-        addProject(input: AddProjectInput!): Project!
-        addTodo(input: AddTodoInput!): Todo!
-    }
-`);
-
-// Resolvers
-const root = {
-    // Query Resolvers
-    users: () => users,
-    projects: () => projects,
-    todos: () => todos,
-    user: ({ id }) => users.find(user => user.id === parseInt(id)),
-    project: ({ id }) => projects.find(project => project.id === parseInt(id)),
-    todo: ({ id }) => todos.find(todo => todo.id === parseInt(id)),
-
-    // Mutation Resolvers
-    addUser: ({ input }) => {
-        const newUser = { id: userId++, name: input.name };
+// Service implementation
+const todoService = {
+    AddUser: (call, callback) => {
+        const { name } = call.request;
+        const newUser = { id: userId++, name };
         users.push(newUser);
-        return newUser;
+        callback(null, { user: newUser });
     },
-    
-    addProject: ({ input }) => {
-        const user = users.find(u => u.id === parseInt(input.userId));
-        if (!user) throw new Error("User not found");
-    
-        const newProject = { id: projectId++, name: input.name, userId: user.id };
+    AddProject: (call, callback) => {
+        const { name, userId } = call.request;
+        const user = users.find(u => u.id === userId);
+        if (!user) return callback(new Error('User not found'));
+
+        const newProject = { id: projectId++, name, userId };
         projects.push(newProject);
-    
-        // Return the project object along with its associated user
-        return {
-            ...newProject,
-            user
-        };
+        callback(null, { project: newProject });
     },
-    
-    addTodo: ({ input }) => {
-        const user = users.find(u => u.id === parseInt(input.userId));
-        const project = projects.find(p => p.id === parseInt(input.projectId));
-    
-        if (!user) throw new Error("User not found");
-        if (!project) throw new Error("Project not found");
-    
-        const newTodo = {
-            id: todoId++,
-            title: input.title,
-            completed: false,
-            userId: user.id,
-            projectId: project.id
-        };
+    AddTodo: (call, callback) => {
+        const { title, userId, projectId } = call.request;
+        const user = users.find(u => u.id === userId);
+        const project = projects.find(p => p.id === projectId);
+
+        if (!user) return callback(new Error('User not found'));
+        if (!project) return callback(new Error('Project not found'));
+
+        const newTodo = { id: todoId++, title, completed: false, userId, projectId };
         todos.push(newTodo);
-    
-        // Return the todo object with associated user and project resolved
-        return {
-            ...newTodo,
-            user,
-            project
-        };
+        callback(null, { todo: newTodo });
     },
-    
+    GetUsers: (call) => {
+        users.forEach(user => call.write(user));
+        call.end();
+    },
+    GetProjects: (call) => {
+        projects.forEach(project => call.write(project));
+        call.end();
+    },
+    GetTodos: (call) => {
+        todos.forEach(todo => call.write(todo));
+        call.end();
+    },
+    GetTodosByUser: (call) => {
+        const { userId } = call.request;
+        todos
+            .filter(todo => todo.userId === userId)
+            .forEach(todo => call.write(todo));
+        call.end();
+    },
 };
 
-// Middleware for GraphQL
-app.use(
-    '/graphql',
-    graphqlHTTP({
-        schema,
-        rootValue: root,
-        graphiql: true // Enables GraphiQL interface
-    })
-);
+// Start the server
+const server = new grpc.Server();
+server.addService(todoProto.TodoService.service, todoService);
 
-// Lancer le serveur
-app.listen(port, () => {
-    console.log(`GraphQL API listening at http://localhost:${port}/graphql`);
+const PORT = '0.0.0.0:50051';
+server.bindAsync(PORT, grpc.ServerCredentials.createInsecure(), () => {
+    console.log(`gRPC server running at ${PORT}`);
+    server.start();
 });
